@@ -1,0 +1,14 @@
+version: '3.8'
+
+services:
+  api:
+    build: .
+    ports:
+      - "7000:8000"
+    volumes:
+      - .:/app
+    environment:
+      - PYTHONUNBUFFERED=1
+
+    # Utilizando --reload para auto-recarga en modo de desarrollo dentro del contenedor (opcional)
+    command: uvicorn main:app --host 0.0.0.0 --port 8000 --reload
