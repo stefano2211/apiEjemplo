@@ -1,79 +1,120 @@
-from fastapi import FastAPI
-from typing import List, Union
-from pydantic import BaseModel
+import os
+import time
 from datetime import datetime
+from typing import List, Union, Optional
+from contextlib import asynccontextmanager
 
-app = FastAPI(title="API Industrial de Simulación", version="1.0.0")
+from fastapi import FastAPI, Depends, HTTPException, status
+from pydantic import BaseModel
+from sqlalchemy import create_engine, Column, Integer, String, DateTime, Float, Text
+from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy.orm import sessionmaker, Session
+from sqlalchemy.exc import OperationalError
 
+# --- CONFIGURACIÓN DE BASE DE DATOS ---
+DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://postgres:postgres@db:5432/industrial_db")
+
+# Intentar reconectar si la DB no está lista (útil en Docker Compose)
+engine = create_engine(DATABASE_URL)
+SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+Base = declarative_base()
+
+# --- MODELO ORM ---
+class MeasurementORM(Base):
+    __tablename__ = "measurements"
+
+    id = Column(Integer, primary_key=True, index=True)
+    tag_name = Column(String(255), index=True)
+    timestamp = Column(DateTime, default=datetime.utcnow)
+    value = Column(Text)  # Guardamos como texto para soportar float, int, str
+    quality = Column(String(50))
+    status = Column(String(50), default="N/A")
+    category = Column(String(100), default="N/A")
+    department = Column(String(100)) # Maquinaria, Manufactura, MedioAmbiente
+
+# --- ESQUEMAS PYDANTIC ---
 class DataPoint(BaseModel):
     TagName: str
     Timestamp: datetime
     Value: Union[float, int, str]
     Quality: str
-    Status: str = "N/A" # Categorical
-    Category: str = "N/A" # Categorical
+    Status: str = "N/A"
+    Category: str = "N/A"
 
-# 15 Ejemplos para Maquinaria
-machinery_data = [
-    {"TagName": "Maquinaria.Motor1.Temperatura", "Timestamp": "2025-06-01T08:00:00Z", "Value": 75.5, "Quality": "Good", "Status": "Running", "Category": "Thermal"},
-    {"TagName": "Maquinaria.Motor1.Vibracion", "Timestamp": "2025-06-01T08:05:00Z", "Value": 0.05, "Quality": "Good", "Status": "Running", "Category": "Mechanical"},
-    {"TagName": "Maquinaria.BombaA.Presion", "Timestamp": "2025-06-01T08:10:00Z", "Value": 120.2, "Quality": "Good", "Status": "Running", "Category": "Hydraulic"},
-    {"TagName": "Maquinaria.BombaA.Caudal", "Timestamp": "2025-06-01T08:15:00Z", "Value": 45.0, "Quality": "Uncertain", "Status": "Running", "Category": "Hydraulic"},
-    {"TagName": "Maquinaria.Compresor1.Estado", "Timestamp": "2025-06-01T08:20:00Z", "Value": "Activo", "Quality": "Good", "Status": "Running", "Category": "Operational"},
-    {"TagName": "Maquinaria.Compresor1.ConsumoEnergia", "Timestamp": "2025-06-01T08:25:00Z", "Value": 350.5, "Quality": "Good", "Status": "Running", "Category": "Electrical"},
-    {"TagName": "Maquinaria.CintaTransportadora.Velocidad", "Timestamp": "2025-06-01T08:30:00Z", "Value": 2.5, "Quality": "Good", "Status": "Running", "Category": "Mechanical"},
-    {"TagName": "Maquinaria.CintaTransportadora.Carga", "Timestamp": "2025-06-01T08:35:00Z", "Value": 500.0, "Quality": "Good", "Status": "Running", "Category": "Mechanical"},
-    {"TagName": "Maquinaria.RobotEnsamblaje.Ciclos", "Timestamp": "2025-06-01T08:40:00Z", "Value": 150, "Quality": "Good", "Status": "Running", "Category": "Production"},
-    {"TagName": "Maquinaria.RobotEnsamblaje.Errores", "Timestamp": "2025-06-01T08:45:00Z", "Value": 2, "Quality": "Bad", "Status": "Maintenance_Req", "Category": "Production"},
-    {"TagName": "Maquinaria.HornoFundicion.Temp1", "Timestamp": "2025-06-01T08:50:00Z", "Value": 1450.0, "Quality": "Good", "Status": "Heating", "Category": "Thermal"},
-    {"TagName": "Maquinaria.HornoFundicion.Temp2", "Timestamp": "2025-06-01T08:55:00Z", "Value": 1445.5, "Quality": "Good", "Status": "Heating", "Category": "Thermal"},
-    {"TagName": "Maquinaria.HornoFundicion.GasLevel", "Timestamp": "2025-06-01T09:00:00Z", "Value": 80.0, "Quality": "Good", "Status": "Heating", "Category": "Chemical"},
-    {"TagName": "Maquinaria.TornoCNC.RPM", "Timestamp": "2025-06-01T09:05:00Z", "Value": 3000, "Quality": "Good", "Status": "Running", "Category": "Mechanical"},
-    {"TagName": "Maquinaria.TornoCNC.DesgasteHerramienta", "Timestamp": "2025-06-01T09:10:00Z", "Value": 15.2, "Quality": "Warning", "Status": "Running", "Category": "Maintenance"},
-]
+    class Config:
+        from_attributes = True
 
-# 15 Ejemplos para Manufactura / Producción
-manufacturing_data = [
-    {"TagName": "Manufactura.LineaA.ProduccionHora", "Timestamp": "2025-06-01T10:00:00Z", "Value": 350, "Quality": "Good", "Status": "Optimal", "Category": "KPI"},
-    {"TagName": "Manufactura.LineaA.Defectos", "Timestamp": "2025-06-01T10:05:00Z", "Value": 5, "Quality": "Warning", "Status": "Review", "Category": "QualityControl"},
-    {"TagName": "Manufactura.LineaA.Turno", "Timestamp": "2025-06-01T10:10:00Z", "Value": "Mañana", "Quality": "Good", "Status": "Active", "Category": "HR"},
-    {"TagName": "Manufactura.LineaB.ProduccionHora", "Timestamp": "2025-06-01T10:15:00Z", "Value": 420, "Quality": "Good", "Status": "Optimal", "Category": "KPI"},
-    {"TagName": "Manufactura.LineaB.Defectos", "Timestamp": "2025-06-01T10:20:00Z", "Value": 12, "Quality": "Bad", "Status": "Action_Required", "Category": "QualityControl"},
-    {"TagName": "Manufactura.LineaB.Turno", "Timestamp": "2025-06-01T10:25:00Z", "Value": "Mañana", "Quality": "Good", "Status": "Active", "Category": "HR"},
-    {"TagName": "Manufactura.Empaquetado.CajasSelladas", "Timestamp": "2025-06-01T10:30:00Z", "Value": 1500, "Quality": "Good", "Status": "Optimal", "Category": "Logistics"},
-    {"TagName": "Manufactura.Empaquetado.MaterialFaltante", "Timestamp": "2025-06-01T10:35:00Z", "Value": "Carton", "Quality": "Warning", "Status": "Low_Stock", "Category": "Inventory"},
-    {"TagName": "Manufactura.Calidad.MuestraAleatoria", "Timestamp": "2025-06-01T10:40:00Z", "Value": "Aprobado", "Quality": "Good", "Status": "Tested", "Category": "QualityControl"},
-    {"TagName": "Manufactura.Ensamblaje.TiempoCiclo", "Timestamp": "2025-06-01T10:45:00Z", "Value": 45.5, "Quality": "Good", "Status": "Normal", "Category": "Efficiency"},
-    {"TagName": "Manufactura.Ensamblaje.EficienciaOEE", "Timestamp": "2025-06-01T10:50:00Z", "Value": 85.2, "Quality": "Good", "Status": "On_Target", "Category": "KPI"},
-    {"TagName": "Manufactura.Pintura.GrosorCapa", "Timestamp": "2025-06-01T10:55:00Z", "Value": 1.2, "Quality": "Good", "Status": "Normal", "Category": "QualityControl"},
-    {"TagName": "Manufactura.Pintura.Color", "Timestamp": "2025-06-01T11:00:00Z", "Value": "Rojo_Industrial", "Quality": "Good", "Status": "Active", "Category": "Configuration"},
-    {"TagName": "Manufactura.Logistica.PalletsTerminados", "Timestamp": "2025-06-01T11:05:00Z", "Value": 45, "Quality": "Good", "Status": "Ready", "Category": "Logistics"},
-    {"TagName": "Manufactura.Logistica.CamionesCargando", "Timestamp": "2025-06-01T11:10:00Z", "Value": 2, "Quality": "Good", "Status": "In_Progress", "Category": "Logistics"},
-]
+# --- DEPENDENCIAS ---
+def get_db():
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
 
-# 15 Ejemplos para Sensores y Medio Ambiente Industrial
-environment_data = [
-    {"TagName": "MedioAmbiente.Zona1.Temperatura", "Timestamp": "2025-06-01T12:00:00Z", "Value": 24.5, "Quality": "Good", "Status": "Normal", "Category": "Climate"},
-    {"TagName": "MedioAmbiente.Zona1.Humedad", "Timestamp": "2025-06-01T12:05:00Z", "Value": 45.0, "Quality": "Good", "Status": "Normal", "Category": "Climate"},
-    {"TagName": "MedioAmbiente.Zona1.CalidadAire_AQI", "Timestamp": "2025-06-01T12:10:00Z", "Value": 42, "Quality": "Good", "Status": "Healthy", "Category": "Safety"},
-    {"TagName": "MedioAmbiente.Soldadura.NivelCO2", "Timestamp": "2025-06-01T12:15:00Z", "Value": 850.0, "Quality": "Warning", "Status": "Elevated", "Category": "Safety"},
-    {"TagName": "MedioAmbiente.Soldadura.ExtraccionAvanzada", "Timestamp": "2025-06-01T12:20:00Z", "Value": "Encendido", "Quality": "Good", "Status": "Active", "Category": "HVAC"},
-    {"TagName": "MedioAmbiente.PlantaAgua.PhNivel", "Timestamp": "2025-06-01T12:25:00Z", "Value": 7.2, "Quality": "Good", "Status": "Normal", "Category": "WaterTreatment"},
-    {"TagName": "MedioAmbiente.PlantaAgua.Turbidez", "Timestamp": "2025-06-01T12:30:00Z", "Value": 1.5, "Quality": "Good", "Status": "Normal", "Category": "WaterTreatment"},
-    {"TagName": "MedioAmbiente.PlantaAgua.BombaFiltro", "Timestamp": "2025-06-01T12:35:00Z", "Value": "Apagado", "Quality": "Good", "Status": "Standby", "Category": "HVAC"},
-    {"TagName": "MedioAmbiente.Exterior.Temperatura", "Timestamp": "2025-06-01T12:40:00Z", "Value": 30.5, "Quality": "Good", "Status": "Sunny", "Category": "Weather"},
-    {"TagName": "MedioAmbiente.Exterior.VelocidadViento", "Timestamp": "2025-06-01T12:45:00Z", "Value": 12.5, "Quality": "Good", "Status": "Breezy", "Category": "Weather"},
-    {"TagName": "MedioAmbiente.Generador.Ruido_dB", "Timestamp": "2025-06-01T12:50:00Z", "Value": 85.0, "Quality": "Warning", "Status": "Loud", "Category": "Safety"},
-    {"TagName": "MedioAmbiente.Almacen.Iluminacion", "Timestamp": "2025-06-01T12:55:00Z", "Value": "Eco_Mode", "Quality": "Good", "Status": "EnergySaving", "Category": "Lighting"},
-    {"TagName": "MedioAmbiente.Almacen.Presencia", "Timestamp": "2025-06-01T13:00:00Z", "Value": "Detectado", "Quality": "Good", "Status": "Occupied", "Category": "Security"},
-    {"TagName": "MedioAmbiente.Oficinas.HVAC_Modo", "Timestamp": "2025-06-01T13:05:00Z", "Value": "Auto", "Quality": "Good", "Status": "Active", "Category": "HVAC"},
-    {"TagName": "MedioAmbiente.Oficinas.ConsumoElectrico", "Timestamp": "2025-06-01T13:10:00Z", "Value": 45.2, "Quality": "Good", "Status": "Normal", "Category": "Energy"},
-]
+# --- DATOS INICIALES PARA SEEDING ---
+initial_data = {
+    "Maquinaria": [
+        {"TagName": "Maquinaria.Motor1.Temperatura", "Timestamp": "2025-06-01T08:00:00Z", "Value": 75.5, "Quality": "Good", "Status": "Running", "Category": "Thermal"},
+        {"TagName": "Maquinaria.Motor1.Vibracion", "Timestamp": "2025-06-01T08:05:00Z", "Value": 0.05, "Quality": "Good", "Status": "Running", "Category": "Mechanical"},
+        {"TagName": "Maquinaria.BombaA.Presion", "Timestamp": "2025-06-01T08:10:00Z", "Value": 120.2, "Quality": "Good", "Status": "Running", "Category": "Hydraulic"},
+    ],
+    "Manufactura": [
+        {"TagName": "Manufactura.LineaA.ProduccionHora", "Timestamp": "2025-06-01T10:00:00Z", "Value": 350, "Quality": "Good", "Status": "Optimal", "Category": "KPI"},
+        {"TagName": "Manufactura.LineaA.Defectos", "Timestamp": "2025-06-01T10:05:00Z", "Value": 5, "Quality": "Warning", "Status": "Review", "Category": "QualityControl"},
+    ],
+    "MedioAmbiente": [
+        {"TagName": "MedioAmbiente.Zona1.Temperatura", "Timestamp": "2025-06-01T12:00:00Z", "Value": 24.5, "Quality": "Good", "Status": "Normal", "Category": "Climate"},
+        {"TagName": "MedioAmbiente.Zona1.Humedad", "Timestamp": "2025-06-01T12:05:00Z", "Value": 45.0, "Quality": "Good", "Status": "Normal", "Category": "Climate"},
+    ]
+}
+
+def seed_db(db: Session):
+    count = db.query(MeasurementORM).count()
+    if count == 0:
+        print("🌱 Seeding database with initial simulation data...")
+        for dept, points in initial_data.items():
+            for p in points:
+                db_item = MeasurementORM(
+                    tag_name=p["TagName"],
+                    timestamp=datetime.fromisoformat(p["Timestamp"].replace("Z", "+00:00")),
+                    value=str(p["Value"]),
+                    quality=p["Quality"],
+                    status=p["Status"],
+                    category=p["Category"],
+                    department=dept
+                )
+                db.add(db_item)
+        db.commit()
+        print("✅ Seeding complete.")
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Intentar conexión con reintentos para esperar a Postgres
+    retries = 5
+    while retries > 0:
+        try:
+            Base.metadata.create_all(bind=engine)
+            db = SessionLocal()
+            seed_db(db)
+            db.close()
+            print("🚀 Database initialized successfully.")
+            break
+        except OperationalError:
+            retries -= 1
+            print(f"⌛ Waiting for database... ({retries} retries left)")
+            time.sleep(2)
+    yield
+
+app = FastAPI(title="API Industrial de Simulación (SQL Enabled)", version="2.0.0", lifespan=lifespan)
+
+# --- ENDPOINTS ---
 
 @app.get("/")
 def read_root():
     return {
-        "message": "Bienvenido a la API Industrial",
+        "message": "Bienvenido a la API Industrial con persistencia SQL",
+        "database": "PostgreSQL",
         "endpoints_disponibles": {
             "maquinaria": ["GET /api/v1/maquinaria", "POST /api/v1/maquinaria"],
             "manufactura": ["GET /api/v1/manufactura", "POST /api/v1/manufactura"],
@@ -81,41 +122,56 @@ def read_root():
         }
     }
 
-@app.get("/api/v1/maquinaria", response_model=List[DataPoint])
-def get_machinery_data():
-    return machinery_data
+def get_dept_data(dept: str, db: Session):
+    items = db.query(MeasurementORM).filter(MeasurementORM.department == dept).all()
+    # Convertir a formato Pydantic para la respuesta
+    return [
+        {
+            "TagName": item.tag_name,
+            "Timestamp": item.timestamp,
+            "Value": item.value, # Devolvemos como string para ser seguros, o podrías intentar castear
+            "Quality": item.quality,
+            "Status": item.status,
+            "Category": item.category
+        } for item in items
+    ]
 
-@app.post("/api/v1/maquinaria", response_model=dict, status_code=201)
-def add_machinery_data(data: Union[List[DataPoint], DataPoint]):
-    if isinstance(data, list):
-        machinery_data.extend(data)
-        return {"message": f"Se han añadido {len(data)} registros a Maquinaria exitosamente"}
-    else:
-        machinery_data.append(data)
-        return {"message": "Se ha añadido 1 registro a Maquinaria exitosamente"}
+def add_dept_data(dept: str, data: Union[List[DataPoint], DataPoint], db: Session):
+    points = data if isinstance(data, list) else [data]
+    for p in points:
+        new_item = MeasurementORM(
+            tag_name=p.TagName,
+            timestamp=p.Timestamp,
+            value=str(p.Value),
+            quality=p.Quality,
+            status=p.Status,
+            category=p.Category,
+            department=dept
+        )
+        db.add(new_item)
+    db.commit()
+    return {"message": f"Se han añadido {len(points)} registros a {dept} exitosamente en la DB"}
 
-@app.get("/api/v1/manufactura", response_model=List[DataPoint])
-def get_manufacturing_data():
-    return manufacturing_data
+@app.get("/api/v1/maquinaria")
+def get_machinery_data(db: Session = Depends(get_db)):
+    return get_dept_data("Maquinaria", db)
 
-@app.post("/api/v1/manufactura", response_model=dict, status_code=201)
-def add_manufacturing_data(data: Union[List[DataPoint], DataPoint]):
-    if isinstance(data, list):
-        manufacturing_data.extend(data)
-        return {"message": f"Se han añadido {len(data)} registros a Manufactura exitosamente"}
-    else:
-        manufacturing_data.append(data)
-        return {"message": "Se ha añadido 1 registro a Manufactura exitosamente"}
+@app.post("/api/v1/maquinaria", status_code=201)
+def add_machinery_data(data: Union[List[DataPoint], DataPoint], db: Session = Depends(get_db)):
+    return add_dept_data("Maquinaria", data, db)
 
-@app.get("/api/v1/medio-ambiente", response_model=List[DataPoint])
-def get_environment_data():
-    return environment_data
+@app.get("/api/v1/manufactura")
+def get_manufacturing_data(db: Session = Depends(get_db)):
+    return get_dept_data("Manufactura", db)
 
-@app.post("/api/v1/medio-ambiente", response_model=dict, status_code=201)
-def add_environment_data(data: Union[List[DataPoint], DataPoint]):
-    if isinstance(data, list):
-        environment_data.extend(data)
-        return {"message": f"Se han añadido {len(data)} registros a Medio Ambiente exitosamente"}
-    else:
-        environment_data.append(data)
-        return {"message": "Se ha añadido 1 registro a Medio Ambiente exitosamente"}
+@app.post("/api/v1/manufactura", status_code=201)
+def add_manufacturing_data(data: Union[List[DataPoint], DataPoint], db: Session = Depends(get_db)):
+    return add_dept_data("Manufactura", data, db)
+
+@app.get("/api/v1/medio-ambiente")
+def get_environment_data(db: Session = Depends(get_db)):
+    return get_dept_data("MedioAmbiente", db)
+
+@app.post("/api/v1/medio-ambiente", status_code=201)
+def add_environment_data(data: Union[List[DataPoint], DataPoint], db: Session = Depends(get_db)):
+    return add_dept_data("MedioAmbiente", data, db)

@@ -9,6 +9,21 @@ services:
       - .:/app
     environment:
       - PYTHONUNBUFFERED=1
-
-    # Utilizando --reload para auto-recarga en modo de desarrollo dentro del contenedor (opcional)
+      - DATABASE_URL=postgresql://postgres:postgres@db:5432/industrial_db
+    depends_on:
+      - db
     command: uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+
+  db:
+    image: postgres:16-alpine
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_DB=industrial_db
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+volumes:
+  postgres_data:
