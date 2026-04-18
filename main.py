@@ -124,12 +124,18 @@ def read_root():
 
 def get_dept_data(dept: str, db: Session):
     items = db.query(MeasurementORM).filter(MeasurementORM.department == dept).all()
-    # Convertir a formato Pydantic para la respuesta
+    # Helper to convert to float if possible
+    def parse_value(v: str):
+        try:
+            return float(v) if '.' in v else int(v)
+        except (ValueError, TypeError):
+            return v
+
     return [
         {
             "TagName": item.tag_name,
             "Timestamp": item.timestamp,
-            "Value": item.value, # Devolvemos como string para ser seguros, o podrías intentar castear
+            "Value": parse_value(item.value),
             "Quality": item.quality,
             "Status": item.status,
             "Category": item.category
