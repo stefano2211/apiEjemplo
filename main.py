@@ -106,7 +106,7 @@ async def lifespan(app: FastAPI):
             time.sleep(2)
     yield
 
-app = FastAPI(title="API Industrial de Simulación (SQL Enabled)", version="2.0.0", lifespan=lifespan)
+app = FastAPI(title="API Industrial de Simulación (SQL Enabled)", version="2.0.0", lifespan=lifespan, port=7000)
 
 # --- ENDPOINTS ---
 
