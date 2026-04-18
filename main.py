@@ -106,7 +106,7 @@ async def lifespan(app: FastAPI):
             time.sleep(2)
     yield
 
-app = FastAPI(title="API Industrial de Simulación (SQL Enabled)", version="2.0.0", lifespan=lifespan, port=7000)
+app = FastAPI(title="API Industrial de Simulación (SQL Enabled)", version="2.0.0", lifespan=lifespan)
 
 # --- ENDPOINTS ---
 
@@ -179,4 +179,4 @@ def add_environment_data(data: Union[List[DataPoint], DataPoint], db: Session = 
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="[IP_ADDRESS]", port=7000)
+    uvicorn.run(app, host="0.0.0.0", port=7000)
