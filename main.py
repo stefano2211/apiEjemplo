@@ -175,3 +175,8 @@ def get_environment_data(db: Session = Depends(get_db)):
 @app.post("/api/v1/medio-ambiente", status_code=201)
 def add_environment_data(data: Union[List[DataPoint], DataPoint], db: Session = Depends(get_db)):
     return add_dept_data("MedioAmbiente", data, db)
+
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="[IP_ADDRESS]", port=7000)
